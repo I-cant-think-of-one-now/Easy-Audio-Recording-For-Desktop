@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Voice Recorder with Waveform</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 40px;
+      background-color: #f9f9f9;
+    }
+    button {
+      margin: 10px;
+      padding: 15px 25px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .start { background-color: #28a745; color: white; }
+    .stop { background-color: #dc3545; color: white; }
+    .play { background-color: #007bff; color: white; }
+    .download { background-color: #ffc107; color: black; }
+    canvas {
+      margin-top: 20px;
+      width: 100%;
+      max-width: 600px;
+      height: 100px;
+      background-color: #fff;
+      border: 1px solid #ccc;
+    }
+    #status {
+      margin-top: 20px;
+      font-size: 18px;
+    }
+    .no-recording {
+      color: red;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Voice Recorder with Waveform</h1>
+  <button class="start">Start Recording</button>
+  <button class="stop" disabled>Stop Recording</button>
+  <button class="play" disabled>Play Recording</button>
+  <button class="download" disabled>Download</button>
+
+  <canvas id="waveform"></canvas>
+  <div id="status" class="no-recording">No recordings found</div>
+
+  <script>
+    let mediaRecorder;
+    let audioChunks = [];
+    let audioBlob;
+    let audioUrl;
+    let audio;
+    let stream;
+    let analyser;
+    let audioCtx;
+    let source;
+    let animationId;
+    let startTime;
+    let durationSec = 0;
+
+    const canvas = document.getElementById('waveform');
+    const canvasCtx = canvas.getContext('2d');
+
+    const startBtn = document.querySelector('.start');
+    const stopBtn = document.querySelector('.stop');
+    const playBtn = document.querySelector('.play');
+    const downloadBtn = document.querySelector('.download');
+    const statusText = document.getElementById('status');
+
+    const formatTime = (seconds) => {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    };
+
+    const drawWaveform = () => {
+      const bufferLength = analyser.fftSize;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const draw = () => {
+        animationId = requestAnimationFrame(draw);
+        analyser.getByteTimeDomainData(dataArray);
+
+        canvasCtx.fillStyle = 'white';
+        canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+        canvasCtx.lineWidth = 2;
+        canvasCtx.strokeStyle = '#007bff';
+        canvasCtx.beginPath();
+
+        const sliceWidth = canvas.width / bufferLength;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+          const v = dataArray[i] / 128.0;
+          const y = (v * canvas.height) / 2;
+
+          i === 0 ? canvasCtx.moveTo(x, y) : canvasCtx.lineTo(x, y);
+          x += sliceWidth;
+        }
+
+        canvasCtx.lineTo(canvas.width, canvas.height / 2);
+        canvasCtx.stroke();
+      };
+
+      draw();
+    };
+
+    startBtn.onclick = async () => {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+
+      source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      drawWaveform();
+
+      mediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+      startTime = Date.now();
+
+      mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+
+      mediaRecorder.onstop = () => {
+        durationSec = (Date.now() - startTime) / 1000;
+        audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+        audioUrl = URL.createObjectURL(audioBlob);
+        audio = new Audio(audioUrl);
+
+        playBtn.disabled = false;
+        downloadBtn.disabled = false;
+        cancelAnimationFrame(animationId);
+        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Update status
+        statusText.classList.remove('no-recording');
+        statusText.textContent = `Segment recorded: ${formatTime(durationSec)}`;
+      };
+
+      mediaRecorder.start();
+
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      playBtn.disabled = true;
+      downloadBtn.disabled = true;
+      statusText.classList.add('no-recording');
+      statusText.textContent = "Recording...";
+    };
+
+    stopBtn.onclick = () => {
+      mediaRecorder.stop();
+      stream.getTracks().forEach(track => track.stop());
+      audioCtx.close();
+
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    };
+
+    playBtn.onclick = () => {
+      if (audio) {
+        audio.play();
+      }
+    };
+
+    downloadBtn.onclick = () => {
+      const link = document.createElement('a');
+      link.href = audioUrl;
+      link.download = 'recording.wav';
+      link.click();
+    };
+  </script>
+
+</body>
+</html>
+
